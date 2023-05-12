@@ -11,6 +11,8 @@ const delbtn = document.querySelectorAll("#del");
 const searchinp = document.querySelector(".searchinp");
 const searchbox = document.querySelector(".searchbox");
 const overlay2 = document.querySelector(".overlay2");
+const overlay3 = document.querySelector(".overlay3");
+const storys = document.querySelector(".storys");
 const feeds = document.querySelector(".feeds");
 const loadbtn = document.querySelector(".load-more");
 var bookmark_btn = document.querySelector(".bookmark-btn");
@@ -18,6 +20,19 @@ var temp = "";
 var count = 0;
 var posts = [];
 var user = {};
+
+storys.addEventListener("click", () => {
+  overlay3.style.display = "flex";
+  overlay3.innerHTML = `<div class="close">X</div>
+  <img class="close-img" src="../images/img/f1.png" alt="" />`;
+});
+overlay3.addEventListener("click", (e) => {
+  if (e.target.classList.contains("close")) {
+    overlay3.style.display = "none";
+  }
+});
+
+
 
 home_btn.addEventListener("click", () => {
   fetchPost(count);

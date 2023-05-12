@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 
 const plm = require("passport-local-mongoose");
-const conn = mongoose.createConnection("mongodb://localhost/fbclone")
+const conn = mongoose.createConnection("mongodb://localhost/fbclone");
 mongoose.connect("mongodb://localhost/fbclone", {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -38,6 +38,12 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: "0",
   },
+  stories: [
+    {
+      type: String,
+      expires: 86400,  // 24 hours
+    },
+  ],
   went_to: { default: "", type: String },
   degree: { default: "", type: String },
   field_of_study: { default: "", type: String },
@@ -53,5 +59,4 @@ userSchema.plugin(plm, { usernameField: "email" });
 
 const User = mongoose.model("User", userSchema);
 
-module.exports = { User, conn}
-
+module.exports = { User, conn };
