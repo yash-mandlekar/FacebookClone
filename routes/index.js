@@ -8,8 +8,9 @@ const Chat = require("./chatModel");
 const Group = require("./groupModel");
 const GroupChat = require("./groupChatModel");
 const Member = require("./memberModel");
-const expressSession = require("express-session");
 const commentModel = require("./comment");
+const storyModel = require("./story");
+const expressSession = require("express-session");
 const passport = require("passport");
 const localStrategy = require("passport-local");
 const { GridFsStorage } = require("multer-gridfs-storage");
@@ -77,7 +78,7 @@ const storage2 = new GridFsStorage({
 //   },
 // });
 const uploadIMG = multer({ storage });
-const uploadVID = multer({ storage:storage2 });
+const uploadVID = multer({ storage: storage2 });
 
 // Login Page
 router.get("/", checkLoggedIn, async (req, res, next) => {
@@ -625,21 +626,21 @@ router.post(
   uploadIMG.single("cover_image"),
   isLoggedIn,
   async (req, res, next) => {
-      const user = await User.findOne({ _id: req.user._id });
-      if (req.file.mimetype.split("/")[0] !== "image") {
-        return res.json({ message: "file type not supported" });
-      }
-      gfs.remove(
-        { filename: user.cover_photo.split("/")[2], root: "File" },
-        (err, gridStore) => {
-          if (err) {
-            return res.status(404).json({ err: err });
-          }
+    const user = await User.findOne({ _id: req.user._id });
+    if (req.file.mimetype.split("/")[0] !== "image") {
+      return res.json({ message: "file type not supported" });
+    }
+    gfs.remove(
+      { filename: user.cover_photo.split("/")[2], root: "File" },
+      (err, gridStore) => {
+        if (err) {
+          return res.status(404).json({ err: err });
         }
-      );
-      user.cover_photo = `/image/${req.file.filename}`;
-      await user.save();
-      res.json({ message: "success upload cover" });
+      }
+    );
+    user.cover_photo = `/image/${req.file.filename}`;
+    await user.save();
+    res.json({ message: "success upload cover" });
   }
 );
 // group
@@ -675,7 +676,7 @@ router.post(
   isLoggedIn,
   async (req, res, next) => {
     try {
-      console.log("file type : ",req.file);
+      console.log("file type : ", req.file);
       const post = await postModel.create({
         author: req.user._id,
         title: req.body.title,
@@ -754,6 +755,68 @@ router.get("/feeds/:page/:qantity", isLoggedIn, async (req, res, next) => {
 
   var user = await User.findById(req.user._id);
   res.json({ posts: posts, user: user });
+});
+// get story
+router.get("/story", isLoggedIn, async (req, res, next) => {
+  const user = await User.findById(req.user._id).populate([
+    {
+      path: "friends",
+      populate: {
+        path: "stories",
+      },
+    },
+    {
+      path: "stories",
+    },
+  ]);
+  res.json({ friends: user.friends, user: user });
+});
+// post story
+router.post(
+  "/uploadstory",
+  isLoggedIn,
+  uploadIMG.single("file"),
+  async (req, res) => {
+    if (!req.file) return res.status(400).json({ err: "file not found" });
+    const user = await User.findById(req.user._id);
+    const story = new storyModel({
+      author: req.user._id,
+      file: `/${req?.file?.mimetype.split("/")[0]}/${req?.file?.filename}`,
+      filetype: req?.file?.mimetype.split("/")[0].trim(),
+    });
+    user.stories.push(story._id);
+    await user.save();
+    await story.save();
+    res.redirect("/home");
+  }
+);
+// get single story
+router.get("/story/:id", isLoggedIn, async (req, res, next) => {
+  const user = await User.findById(req.params.id).populate({
+    path: "stories",
+    populate: {
+      path: "views",
+    },
+  });
+  res.json({ user: user });
+});
+// delete single story
+router.get("/deletestory/:id", isLoggedIn, async (req, res, next) => {
+  const user = await User.findById(req.user._id);
+  await storyModel.findByIdAndDelete(req.params.id);
+  user.stories.pull(req.params.id);
+  await user.save();
+  res.redirect("/home");
+});
+// story Views
+router.get("/storyviews/:id", isLoggedIn, async (req, res, next) => {
+  const story = await storyModel.findById(req.params.id);
+  if (story.views.includes(req.user._id)) return res.json({ story: story });
+  if (story.author.toString() !== req.user._id.toString()) {
+    story.views.push(req.user._id);
+    await story.save();
+  }
+  res.json({ story: story });
 });
 
 function isLoggedIn(req, res, next) {

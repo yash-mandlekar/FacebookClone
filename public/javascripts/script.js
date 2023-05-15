@@ -1,38 +1,196 @@
-const menuItem = document.querySelectorAll(".menu-item");
-var overlay = document.querySelector(".overlay");
+var menuItem = document.querySelectorAll(".menu-item");
 var btnoverlay = document.querySelector(".createpost");
 var home_btn = document.querySelector(".home-btn");
-const message = document.querySelector("#message");
-const messageBox = document.querySelector("#message-box");
-const themeMenu = document.querySelector("#themeMenu");
-const themBOx = document.querySelector(".theme");
-const addBtn = document.querySelectorAll("#add");
-const delbtn = document.querySelectorAll("#del");
-const searchinp = document.querySelector(".searchinp");
-const searchbox = document.querySelector(".searchbox");
-const overlay2 = document.querySelector(".overlay2");
-const overlay3 = document.querySelector(".overlay3");
-const storys = document.querySelector(".storys");
-const feeds = document.querySelector(".feeds");
-const loadbtn = document.querySelector(".load-more");
+var message = document.querySelector("#message");
+var messageBox = document.querySelector("#message-box");
+var themeMenu = document.querySelector("#themeMenu");
+var themBOx = document.querySelector(".theme");
+var addBtn = document.querySelectorAll("#add");
+var delbtn = document.querySelectorAll("#del");
+var searchinp = document.querySelector(".searchinp");
+var searchbox = document.querySelector(".searchbox");
+var overlay = document.querySelector(".overlay");
+var overlay2 = document.querySelector(".overlay2");
+var overlay3 = document.querySelector(".overlay3");
+var overlay4 = document.querySelector(".overlay4");
+var storys = document.querySelector(".storys");
+var feeds = document.querySelector(".feeds");
+var loadbtn = document.querySelector(".load-more");
 var bookmark_btn = document.querySelector(".bookmark-btn");
+var story_inp = document.querySelector(".story-inp");
+var story_cnt = document.querySelector(".story-img");
+var story_img = document.querySelector(".story-img img");
 var temp = "";
 var count = 0;
 var posts = [];
 var user = {};
+var storyUser = {};
+var story = [];
+var friends = [];
+var friendIndex = 0;
 
-storys.addEventListener("click", () => {
-  overlay3.style.display = "flex";
-  overlay3.innerHTML = `<div class="close">X</div>
-  <img class="close-img" src="../images/img/f1.png" alt="" />`;
+storys.addEventListener("click", async (e) => {
+  document.body.style.overflow = "hidden";
+  if (e.target.classList.contains("my-story")) {
+    overlay4.style.display = "flex";
+    document.body.style.height = "100%";
+  } else {
+    friendIndex = e.target.getAttribute("key");
+    if (!e.target.id) return;
+    const { data } = await axios.get(`/story/${e.target.id}`);
+    story = data.user.stories;
+    storyUser = data.user;
+    if (story.length == 0) return;
+    showStory(0);
+  }
 });
-overlay3.addEventListener("click", (e) => {
-  if (e.target.classList.contains("close")) {
-    overlay3.style.display = "none";
+let interval;
+const startTimer = (index) => {
+  clearInterval(interval);
+  var time = 0;
+  interval = setInterval(() => {
+    if (time == 450) {
+      clearInterval(interval);
+      showStory(index + 1);
+    }
+    time++;
+    document.querySelector(".bar").style.width = `${(time / 450) * 100}%`;
+  }, 10);
+};
+
+const showStory = async (index) => {
+  if (story[index]) {
+    var close = `<div class="close">X</div>`;
+    var viewers = story[index].views.map((view) => {
+      return `<a class="profile-cnt" href="/profile/${view._id}">
+      <div class="profile-phots">
+        <img src="${view.profile_picture}" alt="" />
+      </div>
+      <p>${view.first_name} ${view.last_name}</p>
+    </a>`;
+    });
+    var nav = `<div class="stry-nav">
+    <div class="profile-cnt">
+      <div class="profile-phots">
+        <img src="${storyUser.profile_picture}" alt="" />
+      </div>
+      <p>${storyUser.first_name} ${storyUser.last_name}</p>
+    </div>
+    ${
+      storyUser._id === user._id
+        ? `
+        <div class="time">
+          <div class="views">
+            <img src="../images/icon/eye.svg" />
+            <p>${story[index].views.length}</p>
+            <div class="views-dropdown" style="${
+              viewers.length == 0 ? "display:none" : ""
+            }">
+              ${viewers.join("")}
+            </div>
+          </div>
+          <a href="/deletestory/${
+            story[index]._id
+          }"><img src="../images/icon/bin.svg"></a>
+        </div>`
+        : ""
+    }
+  </div>`;
+    var bar = `<div class="bar" style="width: 0%;"></div>`;
+    await axios.get(`/storyviews/${story[index]._id}`);
+    var img = `<img class="close-img" src="${story[index].file}" alt="" />`;
+    var next = `<button class="next-btn" onclick="showStory(${
+      index + 1
+    })"> > </button>`;
+    var prev = `<button class="prev-btn" onclick="showStory(${
+      index - 1
+    })"> < </button>`;
+    overlay3.style.display = "flex";
+    if (index == story.length - 1)
+      next = `<button class="next-btn" onclick="showStory(${
+        index + 1
+      })"> </button>`;
+    if (index == 0)
+      prev = `<button class="prev-btn" onclick="showStory(${
+        index - 1
+      })"> </button>`;
+    if (index == story.length - 1)
+      img = `<img class="close-img" src="${story[index].file}" alt="" />`;
+    overlay3.innerHTML = close + nav + bar + img + next + prev;
+    startTimer(index);
+  } else {
+    if (index === -1) {
+      friendIndex--;
+    } else {
+      friendIndex++;
+    }
+    if (friends[friendIndex]?._id) {
+      const { data } = await axios.get(`/story/${friends[friendIndex]._id}`);
+      story = data.user.stories;
+      storyUser = data.user;
+      if (story.length == 0) return;
+      showStory(0);
+    } else {
+      overlay3.style.display = "none";
+      document.body.style.overflow = "hidden";
+    }
+  }
+};
+
+story_inp.onchange = (e) => {
+  const [file] = e.target.files;
+  if (file) {
+    story_cnt.style.display = "flex";
+    story_img.src = URL.createObjectURL(file);
+  }
+};
+
+overlay4.addEventListener("click", (e) => {
+  if (
+    e.target.classList.contains("cross") ||
+    e.target.classList.contains("overlay4")
+  ) {
+    overlay4.style.display = "none";
+    document.body.style.overflow = "auto";
   }
 });
 
-
+overlay3.addEventListener("click", (e) => {
+  if (
+    e.target.classList.contains("close") ||
+    e.target.classList.contains("overlay3")
+  ) {
+    overlay3.style.display = "none";
+    document.body.style.overflow = "hidden";
+  }
+});
+const fetchStories = async () => {
+  const { data } = await axios.get("/story");
+  var temp = `<div class="story" id="${
+    data?.user?._id
+  }" key=${-1} style="background-image: url(${data?.user?.stories[0]?.file});">
+  <div class="profile-phots" id="${data?.user?._id}">
+    <img id="${data?.user?._id}" src="${data.user.profile_picture}" alt="" />
+  </div>
+  <div class="botm my-story">
+      <button><img class="my-story" src="../images/icon/plus.svg" alt=""></button>
+      Create Story
+  </div>
+</div>`;
+  data.friends.forEach((friend, i) => {
+    if (friend?.stories[0]) {
+      temp += `<div id="${friend?._id}" key="${i}" class="story" style="background-image: url(${friend?.stories[0].file});">
+      <div id="${friend?.stories[0].file}" class="profile-phots">
+      <img id="${friend?.stories[0].file}" src="${friend.profile_picture}" alt="" />
+      </div>
+      <p id="${friend?.stories[0].file}">${friend.first_name} ${friend.last_name}</p>
+      </div>`;
+      friends.push(friend);
+    }
+  });
+  storys.innerHTML = temp;
+};
+fetchStories();
 
 home_btn.addEventListener("click", () => {
   fetchPost(count);
@@ -101,7 +259,6 @@ window.addEventListener("scroll", () => {
 //  Search bar
 
 searchinp.addEventListener("keydown", (e) => {
-  console.log(e.target.value);
   if (e.target.value.length > 0) {
     axios.get(`/username/${e.target.value}`).then((res) => {
       searchbox.innerHTML = "";
@@ -185,8 +342,11 @@ overlay2.addEventListener("click", (e) => {
 });
 
 const fetchPost = async (page) => {
-  var limit = 15;
+  var limit = 5;
   const { data } = await axios.get(`/feeds/${page}/${limit}`);
+  if (data.posts.length === 0) {
+    loadbtn.style.display = "none";
+  }
   posts.push(...data.posts);
   user = data.user;
   feeds.innerHTML = handleloop(data);
@@ -223,7 +383,6 @@ const handleBookmark = async (e) => {
 };
 
 const handleloop = (data) => {
-  console.log(data);
   data.posts.forEach((post) => {
     temp += `<div class="feed">
         <div class="head">

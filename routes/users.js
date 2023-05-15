@@ -40,8 +40,8 @@ const userSchema = new mongoose.Schema({
   },
   stories: [
     {
-      type: String,
-      expires: 86400,  // 24 hours
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Story",
     },
   ],
   went_to: { default: "", type: String },
