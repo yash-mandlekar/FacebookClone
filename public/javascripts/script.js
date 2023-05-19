@@ -28,26 +28,35 @@ var storyUser = {};
 var story = [];
 var friends = [];
 var friendIndex = 0;
-
+let interval;
+var time = 0;
+var flag = 0;
+// -------------------------------- All About Story --------------------------------
 storys.addEventListener("click", async (e) => {
-  document.body.style.overflow = "hidden";
   if (e.target.classList.contains("my-story")) {
     overlay4.style.display = "flex";
     document.body.style.height = "100%";
+    document.body.style.overflow = "hidden";
   } else {
     friendIndex = e.target.getAttribute("key");
     if (!e.target.id) return;
+    console.log(e.target.id);
     const { data } = await axios.get(`/story/${e.target.id}`);
     story = data.user.stories;
     storyUser = data.user;
     if (story.length == 0) return;
     showStory(0);
+    document.body.style.overflow = "hidden";
   }
 });
-let interval;
 const startTimer = (index) => {
+  if(index === null){
+    overlay3.style.display = "none";
+    document.body.style.overflow = "auto";
+    return;
+  }
   clearInterval(interval);
-  var time = 0;
+  time = 0;
   interval = setInterval(() => {
     if (time == 450) {
       clearInterval(interval);
@@ -58,7 +67,33 @@ const startTimer = (index) => {
   }, 10);
 };
 
+const pauseTimer = (index) => {
+  if (flag == 0) {
+    clearInterval(interval);
+    flag = 1;
+    document.querySelector(".play img").src = "../images/icon/play.svg";
+  } else {
+    flag = 0;
+    interval = setInterval(() => {
+      if (time == 450) {
+        clearInterval(interval);
+        showStory(index + 1);
+      }
+      time++;
+      document.querySelector(".bar").style.width = `${(time / 450) * 100}%`;
+    }, 10);
+    document.querySelector(".play img").src = "../images/icon/pause.svg";
+  }
+};
+
 const showStory = async (index) => {
+  flag = 0;
+  if (index === null) {
+    overlay3.style.display = "none";
+    document.body.style.overflow = "auto";
+    clearInterval(interval);
+    return;
+  }
   if (story[index]) {
     var close = `<div class="close">X</div>`;
     var viewers = story[index].views.map((view) => {
@@ -70,16 +105,19 @@ const showStory = async (index) => {
     </a>`;
     });
     var nav = `<div class="stry-nav">
-    <div class="profile-cnt">
+    <a class="profile-cnt" href="/profile/${storyUser._id}">
       <div class="profile-phots">
         <img src="${storyUser.profile_picture}" alt="" />
       </div>
       <p>${storyUser.first_name} ${storyUser.last_name}</p>
+    </a>
+    <div class="play" onclick="pauseTimer(${index})">
+      <img src="../images/icon/pause.svg" />
     </div>
+    <div class="time">
     ${
       storyUser._id === user._id
         ? `
-        <div class="time">
           <div class="views">
             <img src="../images/icon/eye.svg" />
             <p>${story[index].views.length}</p>
@@ -92,9 +130,10 @@ const showStory = async (index) => {
           <a href="/deletestory/${
             story[index]._id
           }"><img src="../images/icon/bin.svg"></a>
-        </div>`
-        : ""
+          `
+        : "<img src='../images/icon/white-dots.svg' />"
     }
+        </div>
   </div>`;
     var bar = `<div class="bar" style="width: 0%;"></div>`;
     await axios.get(`/storyviews/${story[index]._id}`);
@@ -119,11 +158,8 @@ const showStory = async (index) => {
     overlay3.innerHTML = close + nav + bar + img + next + prev;
     startTimer(index);
   } else {
-    if (index === -1) {
-      friendIndex--;
-    } else {
-      friendIndex++;
-    }
+    if (index === -1) friendIndex--;
+    else friendIndex++;
     if (friends[friendIndex]?._id) {
       const { data } = await axios.get(`/story/${friends[friendIndex]._id}`);
       story = data.user.stories;
@@ -132,7 +168,7 @@ const showStory = async (index) => {
       showStory(0);
     } else {
       overlay3.style.display = "none";
-      document.body.style.overflow = "hidden";
+      document.body.style.overflow = "auto";
     }
   }
 };
@@ -159,9 +195,12 @@ overlay3.addEventListener("click", (e) => {
   if (
     e.target.classList.contains("close") ||
     e.target.classList.contains("overlay3")
-  ) {
-    overlay3.style.display = "none";
-    document.body.style.overflow = "hidden";
+    ) {
+      overlay3.style.display = "none";
+      document.body.style.overflow = "hidden";
+      showStory(null);
+      startTimer(null);
+      clearInterval(interval);
   }
 });
 const fetchStories = async () => {
@@ -191,7 +230,7 @@ const fetchStories = async () => {
   storys.innerHTML = temp;
 };
 fetchStories();
-
+// -------------------------------- All about post --------------------------------
 home_btn.addEventListener("click", () => {
   fetchPost(count);
 });
@@ -199,6 +238,7 @@ home_btn.addEventListener("click", () => {
 btnoverlay.addEventListener("click", () => {
   overlay.style.display = "block";
 });
+
 overlay.addEventListener("click", (e) => {
   if (
     e.target.classList.contains("overlay") ||
@@ -236,18 +276,6 @@ message.addEventListener("click", () => {
   setTimeout(() => {
     messageBox.classList.remove("box-sh");
   }, 2000);
-});
-
-addBtn.forEach((element) => {
-  element.addEventListener("click", () => {
-    element.parentElement.style.display = "none";
-  });
-});
-
-delbtn.forEach((element) => {
-  element.addEventListener("click", () => {
-    element.parentElement.parentElement.style.display = "none";
-  });
 });
 
 // WINDOW EVENT.....
@@ -536,3 +564,4 @@ bookmark_btn.addEventListener("click", async () => {
   temp = "";
   feeds.innerHTML = handleloop(data);
 });
+

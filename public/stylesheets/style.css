@@ -389,6 +389,10 @@ main {
 .prev-btn {
   left: 0;
 }
+.play{
+  display: flex;
+  align-items: center;
+}
 .story p {
   z-index: 2;
   align-self: center;
@@ -470,6 +474,7 @@ main {
 }
 .feeds .feed .head {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   margin-bottom: 10px;
 }
@@ -985,9 +990,9 @@ main {
 .stry-nav {
   display: flex;
   align-items: center;
-  justify-content: space-around;
+  justify-content: space-between;
   width: 100%;
-  padding: 1rem;
+  padding: 1rem 27rem;
   background-color: rgba(0, 0, 0, 0.81);
 }
 .profile-cnt {
@@ -1044,7 +1049,7 @@ main {
   }
 }
 .overlay3 img {
-  height: 90%;
+  height: 88%;
 }
 .overlay3 .close {
   cursor: pointer;
@@ -1055,6 +1060,10 @@ main {
   font-family: "Gill Sans", "Gill Sans MT", Calibri, "Trebuchet MS", sans-serif;
   font-size: 25px;
   color: yellow;
+}
+.overlay3 .close-img{
+  width: 40vmax;
+  object-fit: cover;
 }
 .comment {
   cursor: pointer;
