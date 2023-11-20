@@ -1,129 +1,693 @@
 var express = require("express");
+const axios = require("axios");
 var router = express.Router();
-var userModel = require("../models/usermodel");
-var postModel = require("../models/postmodel");
-var commentModel = require("../models/commentModel");
-var storyModel = require('../models/storyModel')
+const otpModel = require("./otp");
+const { User, conn } = require("./users");
+const postModel = require("./post");
+const Chat = require("./chatModel");
+const Group = require("./groupModel");
+const GroupChat = require("./groupChatModel");
+const Member = require("./memberModel");
+const commentModel = require("./comment");
+const storyModel = require("./story");
+const expressSession = require("express-session");
 const passport = require("passport");
-const multer = require("multer");
-const crypto = require("crypto");
-var id3 = require("node-id3");
-const path = require("path");
-const fs = require("fs");
-const { Readable } = require("stream");
-const localStrategy = require("passport-local").Strategy;
-passport.use(new localStrategy(userModel.authenticate()));
-
+const localStrategy = require("passport-local");
+const { GridFsStorage } = require("multer-gridfs-storage");
+const mongodb = require("mongodb");
 const mongoose = require("mongoose");
-const usermodel = require("../models/usermodel");
-mongoose
-  .connect("mongodb://0.0.0.0/instagram")
-  .then(() => {
-  })
-  .catch((err) => {
-  });
+const url = "mongodb://localhost/fbclone";
+const multer = require("multer");
+const Grid = require("gridfs-stream");
 
-var conn = mongoose.connection;
-var gfsbucket;
-var gfsbucketvideo;
-var gfsbucketstory;
-conn.once("open", () => {
-  gfsbucket = new mongoose.mongo.GridFSBucket(conn.db, {
-    bucketName: "post",
-  });
-});
-conn.once("open", () => {
-  gfsbucketvideo = new mongoose.mongo.GridFSBucket(conn.db, {
-    bucketName: "video",
-  });
-});
-conn.once("open", () => {
-  gfsbucketstory = new mongoose.mongo.GridFSBucket(conn.db, {
-    bucketName: "story",
-  });
-});
+passport.use(
+  new localStrategy(
+    { usernameField: "email", passwordField: "password" },
+    User.authenticate()
+  )
+);
+// Connect to MongoDB
 
-const storage1 = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, "./public/images/uploads");
+let gfs;
+conn.once("open", () => {
+  // Init stream
+  gfs = Grid(conn.db, mongoose.mongo);
+  gfs.collection("File");
+});
+// Create a new GridFS storage engine
+const storage = new GridFsStorage({
+  url: url,
+  file: (req, file) => {
+    if (file.mimetype.includes("image")) {
+      return {
+        filename:
+          Date.now() +
+          "-" +
+          Math.round(Math.random() * 1e9) +
+          file.originalname,
+        bucketName: "File",
+      };
+    } else {
+      return {
+        filename: "trash",
+        expires: Date.now() + 20,
+        bucketName: "Trash",
+      };
+    }
   },
-  filename: function (req, file, cb) {
-    const uniqueSuffix =
-      Date.now() +
-      "-" +
-      Math.round(Math.random() * 1e9 + path.extname(file.originalname));
-    cb(null, file.fieldname + "-" + uniqueSuffix);
+});
+const storage2 = new GridFsStorage({
+  url: url,
+  file: (req, file) => {
+    console.log(file);
+    return {
+      filename:
+        Date.now() + "-" + Math.round(Math.random() * 1e9) + file.originalname,
+      bucketName: "File",
+    };
   },
 });
 
-const upload1 = multer({ storage: storage1 });
+// const storage = multer.diskStorage({
+//   destination: function (req, file, cb) {
+//     cb(null, "./public/uploads");
+//   },
+//   filename: function (req, file, cb) {
+//     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+//     cb(null, file.fieldname + "-" + uniqueSuffix + file.originalname);
+//   },
+// });
+const uploadIMG = multer({ storage });
+const uploadVID = multer({ storage: storage2 });
 
-/* GET home page. */
-router.get("/", function (req, res, next) {
-  res.render("index", { title: "Express" });
-});
-router.get("/accounts/emailsignup", function (req, res, next) {
-  res.render("signup");
-});
-
-/*authentication code  */
-
-router.get("/feed", isLoggedIn, async function (req, res, next) {
-  const user = await userModel.findOne({
-    username: req.session.passport.user,
+// Login Page
+router.get("/", checkLoggedIn, async (req, res, next) => {
+  gfs.files.find().toArray((err, files) => {
+    console.log(files);
+    res.render("login");
   });
-  const post = await postModel.find().populate("user");
-  const stories = await storyModel.find().populate("author");
-  res.render("feed", { user, post, stories });
 });
-
-router.get("/reels", isLoggedIn, async function (req, res, next) {
-  const user = await userModel.findOne({
-    username: req.session.passport.user,
-  });
-  const post = await postModel.find().populate("user");
-  res.render("reels", { user, post });
+// Identify Page
+router.post("/load-group-chats", isLoggedIn, async function (req, res, next) {
+  const groupChats = await GroupChat.find({
+    group_id: req.body.group_id,
+  }).populate("sender_id");
+  res.send({ success: true, chats: groupChats });
 });
-router.get("/bookmark/:postid", isLoggedIn, async function (req, res, next) {
-  const user = await userModel.findOne({
-    username: req.session.passport.user,
+router.post("/group-save-chat", isLoggedIn, async function (req, res, next) {
+  var chat = new GroupChat({
+    sender_id: req.body.sender_id,
+    group_id: req.body.group_id,
+    message: req.body.message,
   });
-  if (user.bookmarks.includes(req.params.postid)) {
-    user.bookmarks.splice(user.bookmarks.indexOf(req.params.postid), 1);
+  var newChat = await chat.save();
+  var cChat = await GroupChat.findOne({ _id: newChat._id }).populate(
+    "sender_id"
+  );
+  res.send({ success: true, chat: cChat });
+});
+router.get("/group-chat", isLoggedIn, async function (req, res, next) {
+  const myGroups = await Group.find({ creator_id: req.user._id });
+  const joinedGroups = await Member.find({ user_id: req.user._id }).populate(
+    "group_id"
+  );
+  res.render("chat-group", {
+    myGroups: myGroups,
+    joinedGroups: joinedGroups,
+    user: req.user,
+    user: req.user,
+  });
+});
+router.get("/identify", function (req, res, next) {
+  res.render("identify");
+});
+// Signup Page
+router.get("/group", isLoggedIn, async function (req, res, next) {
+  const groups = await Group.find({ creator_id: req.user._id });
+  res.render("group", { groups: groups });
+});
+router.get("/mess", function (req, res, next) {
+  res.render("mess");
+});
+// SinglePost Page
+router.get("/singlepost/:id", async (req, res, next) => {
+  const user = await User.findOne({ _id: req?.user?._id });
+  const post = await postModel.findOne({ _id: req.params.id }).populate([
+    {
+      path: "author",
+      model: "User",
+    },
+    {
+      path: "comments",
+      model: "Comment",
+      populate: {
+        path: "author",
+        model: "User",
+      },
+    },
+  ]);
+  if (post) {
+    res.render("singlepost", { user: user && user, post: post });
   } else {
-    user.bookmarks.push(req.params.postid);
+    res.redirect("/home");
   }
-  user.save();
-  res.redirect("back")
+});
+// saved post
+router.get("/saved_posts/:id", async (req, res, next) => {
+  const user = await User.findOne({ _id: req?.user?._id });
+  if (user.bookmarks.includes(req.params.id)) {
+    user.bookmarks.pull(req.params.id);
+  } else {
+    user.bookmarks.push(req.params.id);
+  }
+  await user.save();
+  res.redirect("/home");
+});
+// all bookmarks
+router.get("/bookmarks", async (req, res, next) => {
+  const user = await User.findOne({ _id: req?.user?._id });
+  const posts = await postModel
+    .find({ _id: { $in: user.bookmarks } })
+    .populate("author");
+  res.json({ posts, user });
+});
+// block user
+router.get("/block/:id", async (req, res, next) => {
+  const user = await User.findOne({ _id: req?.user?._id });
+  const blockedUser = await User.findOne({ _id: req.params.id });
+  if (user.blocked.includes(req.params.id)) {
+    user.blocked.pull(req.params.id);
+    blockedUser.reports.pull(req.user._id);
+  } else {
+    user.blocked.push(req.params.id);
+    blockedUser.reports.push(req.user._id);
+  }
+  await user.save();
+  await blockedUser.save();
+  res.redirect("back");
+});
+router.post("/get-members", isLoggedIn, async function (req, res, next) {
+  var users = await User.aggregate([
+    {
+      $lookup: {
+        from: "members",
+        localField: "_id",
+        foreignField: "user_id",
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  {
+                    $eq: [
+                      "$group_id",
+                      mongoose.Types.ObjectId(req.body.group_id),
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+        as: "member",
+      },
+    },
+    {
+      $match: {
+        _id: {
+          $nin: [mongoose.Types.ObjectId(req.user._id)],
+        },
+      },
+    },
+  ]);
+  // var users = await User.find({ _id: { $ne: req.user._id } });
+  // var users=await User.find({_id:{$nin:[req.user._id]}})
+  console.log(users);
+
+  res.status(200).send({ success: true, data: users });
+});
+router.post("/add-members", isLoggedIn, async function (req, res, next) {
+  console.log(req.body.limit);
+  // console.log(req.body.checkboxes);
+  if (!req.body.members) {
+    res
+      .status(200)
+      .send({ success: false, msg: "Please select any one Member" });
+  } else if (req.body.members.length > parseInt(req.body.limit)) {
+    res.status(200).send({
+      success: false,
+      msg: "you cannot select more than" + req.body.limit + "Members",
+    });
+  } else {
+    await Member.deleteMany({ group_id: req.body.group_id });
+    var data = [];
+    const members = req.body.members;
+    for (let i = 0; i < members.length; i++) {
+      data.push({
+        group_id: req.body.group_id,
+        user_id: members[i],
+      });
+    }
+    await Member.insertMany(data);
+    res.status(200).send({ success: true, msg: "Members added Successfully" });
+  }
 });
 
-router.post("/register", function (req, res) {
-  var newUser = new userModel({
-    username: req.body.username,
-    email: req.body.email,
-    fullname: req.body.fullname,
-  });
-  userModel.register(newUser, req.body.password).then(function (u) {
-    passport.authenticate("local")(req, res, function () {
-      res.redirect("/feed");
-    });
-  });
+router.get("/home", isLoggedIn, async (req, res, next) => {
+  const posts = await postModel.find({}).populate("author");
+  const user = await User.findOne({ _id: req.user._id }).populate(
+    "friends friend_requests_received"
+  );
+  res.render("home", { user: user, posts: posts });
 });
+router.get("/settings", isLoggedIn, function (req, res, next) {
+  res.render("settings", { user: req.user });
+});
+router.get("/reset/:phone", function (req, res, next) {
+  res.render("reset", { phone: req.params.phone });
+});
+router.post("/otpPage", async function (req, res, next) {
+  console.log(req.body);
+  const { phone } = req.body;
+  var otpSendUser = await User.findOne({ phone: phone });
+  console.log(otpSendUser);
+  if (otpSendUser) {
+    res.json({ message: "success", user: otpSendUser });
+  }
+});
+router.post("/reset/:phone", async function (req, res) {
+  var user = await User.findOne({ phone: req.params.phone });
+  if (user) {
+    await user.setPassword(req.body.newpassword, async function (err, fuser) {
+      res.redirect("/");
+      if (err) console.log(err);
+      else {
+        await user.save();
+      }
+    });
+  }
+});
+router.post("/signup", async (req, res, next) => {
+  const { email, password, firstname, lastname, phone, birthdate, gender } =
+    req.body;
+  const user = await User.findOne({ email: email });
+  if (user) {
+    res.json({ message: "user already exists" });
+  } else {
+    try {
+      const otpval = Math.floor(1000 + Math.random() * 9000);
+      const message = "Your One Time Password (OTP) for online class is ";
+      const apiKey = "I3gCHAhHJHCD9wBP&senderid=WSVTEC&";
+      await axios.post(
+        `http://msg.websoftvalley.com/V2/http-api.php?apikey=${apiKey}number=${phone}&message=${message}${otpval}.&format=json`
+      );
+      const otp = await otpModel.findOne({ phone: phone });
+      if (otp) {
+        await otpModel.findOneAndUpdate(
+          { phone: phone },
+          {
+            otp: otpval,
+            email: email,
+            password: password,
+            firstname: firstname,
+            lastname: lastname,
+            birthdate: birthdate,
+            gender: gender,
+          }
+        );
+      } else {
+        await otpModel.create({
+          phone: phone,
+          otp: otpval,
+          email: email,
+          password: password,
+          firstname: firstname,
+          lastname: lastname,
+          birthdate: birthdate,
+          gender: gender,
+        });
+      }
+      res.json({ message: "success", otp: "send otp" });
+    } catch (error) {
+      console.log(err);
+      ``;
+    }
+  }
+});
+router.post("/sendotp", async (req, res, next) => {
+  console.log(req.body);
+  const { phone } = req.body;
+  const user = await User.findOne({ phone: phone });
+  if (user) {
+    const otpval = Math.floor(1000 + Math.random() * 9000);
+    const message = "Your One Time Password (OTP) for online class is ";
+    const apiKey = "I3gCHAhHJHCD9wBP&senderid=WSVTEC&";
+    axios.post(
+      `http://msg.websoftvalley.com/V2/http-api.php?apikey=${apiKey}number=${phone}&message=${message}${otpval}.&format=json`
+    );
+    const otp = await otpModel.findOne({ phone: phone });
+    if (otp) {
+      await otpModel.findOneAndUpdate({ phone: phone }, { otp: otpval });
+    } else {
+      await otpModel.create({ phone: phone, otp: otpval });
+      res.json({ message: "success", otp: "otp send", user: user });
+    }
+  }
+});
+// login
 router.post(
   "/login",
   passport.authenticate("local", {
-    successRedirect: "feed",
+    successRedirect: "back",
     failureRedirect: "/",
   }),
-  function (req, res, next) { }
+  function (req, res, next) {}
 );
-function isLoggedIn(req, res, next) {
-  if (req.isAuthenticated()) {
-    return next();
-  } else {
-    res.redirect("/");
+router.post("/verifyotp", async (req, res, next) => {
+  const { otp, phone } = req.body;
+  const user = await otpModel.findOne({ otp: otp, phone: phone });
+  if (user) {
+    var newUser = new User({
+      email: user.email,
+      first_name: user.firstname,
+      last_name: user.lastname,
+      phone: user.phone,
+      birthdate: user.birthdate,
+      gender: user.gender,
+    });
+    User.register(newUser, user.password).then(function (u) {
+      req.login(u, function (err) {
+        if (err) {
+          console.log(err);
+        }
+        res.json({ message: "success" });
+      });
+      // res.json({ message: "success" });
+    });
   }
-}
+});
+router.post("/verifyotpsubmit", async (req, res, next) => {
+  const { phone, otp } = req.body;
+  const user = await otpModel.findOne({ phone: phone });
+  console.log("user -> ", user);
+  if (user.otp == otp) {
+    res.json({ message: "success", user: user });
+  }
+});
+// profile
+router.get("/profile/:id", isLoggedIn, async (req, res, next) => {
+  const user = await User.findById(req.params.id).populate("friends posts");
+  const loggedInUser = await User.findById(req.user._id);
+  res.render("profile", { user: user, loggedInUser: loggedInUser });
+});
+
+router.post("/updateprofile", isLoggedIn, async (req, res, next) => {
+  const { firstname, lastname, email, phone } = req.body;
+  const user = await User.findById(req.user._id);
+  user.first_name = firstname;
+  user.last_name = lastname;
+  user.email = email;
+  user.phone = phone;
+  await user.save();
+  res.redirect("/home");
+});
+// Like Post
+router.get("/like/:id", isLoggedIn, async (req, res) => {
+  const post = await postModel.findOne({ _id: req.params.id });
+  if (post.likes.indexOf(req.user._id) === -1) {
+	@@ -423,424 +271,153 @@ router.get("/like/:id", isLoggedIn, async (req, res) => {
+  await post.save();
+  res.redirect(req.header("referer"));
+});
+// delete post
+router.get("/deletepost/:id", isLoggedIn, async (req, res) => {
+  const user = await User.findOne({ _id: req.user._id });
+  var index = user.posts.indexOf(req.params.id);
+  user.posts.splice(index, 1);
+  await user.save();
+  await postModel.findByIdAndDelete(req.params.id);
+  res.redirect(req.header("referer"));
+});
+// friend request
+router.get("/friendrequest/:id", isLoggedIn, async (req, res) => {
+  const user = await User.findOne({ _id: req.user._id });
+  const friend = await User.findOne({ _id: req.params.id });
+  if (user.friend_requests_sent.indexOf(req.params.id) === -1) {
+    user.friend_requests_sent.push(req.params.id);
+    friend.friend_requests_received.push(req.user._id);
+  } else {
+    var index = user.friend_requests_sent.indexOf(req.params.id);
+    user.friend_requests_sent.splice(index, 1);
+    var index2 = friend.friend_requests_received.indexOf(req.user._id);
+    friend.friend_requests_received.splice(index2, 1);
+  }
+  await user.save();
+  await friend.save();
+  res.redirect(req.header("referer"));
+});
+// acceptrequest
+router.get("/acceptrequest/:id", isLoggedIn, async (req, res) => {
+  const user = await User.findOne({ _id: req.user._id });
+  const friend = await User.findOne({ _id: req.params.id });
+  if (user.friends.indexOf(req.params.id) === -1) {
+    user.friends.push(req.params.id);
+    friend.friends.push(req.user._id);
+  }
+  var index = user.friend_requests_received.indexOf(req.params.id);
+  user.friend_requests_received.splice(index, 1);
+  var index2 = friend.friend_requests_sent.indexOf(req.user._id);
+  friend.friend_requests_sent.splice(index2, 1);
+  await user.save();
+  await friend.save();
+  res.redirect(req.header("referer"));
+});
+// deleterequest
+router.get("/deleterequest/:id", isLoggedIn, async (req, res) => {
+  const user = await User.findOne({ _id: req.user._id });
+  const friend = await User.findOne({ _id: req.params.id });
+  var index = user.friend_requests_received.indexOf(req.params.id);
+  user.friend_requests_received.splice(index, 1);
+  var index2 = friend.friend_requests_sent.indexOf(req.user._id);
+  friend.friend_requests_sent.splice(index2, 1);
+  await user.save();
+  await friend.save();
+  res.redirect(req.header("referer"));
+});
+// cancelrequest
+router.get("/cancelrequest/:id", isLoggedIn, async (req, res) => {
+  const user = await User.findOne({ _id: req.user._id });
+  const friend = await User.findOne({ _id: req.params.id });
+  var index = user.friend_requests_sent.indexOf(req.params.id);
+  user.friend_requests_sent.splice(index, 1);
+  var index2 = friend.friend_requests_received.indexOf(req.user._id);
+  friend.friend_requests_received.splice(index2, 1);
+  await user.save();
+  await friend.save();
+  res.redirect(req.header("referer"));
+});
+// unfriend
+router.get("/unfriend/:id", isLoggedIn, async (req, res) => {
+  const user = await User.findOne({ _id: req.user._id });
+  const friend = await User.findOne({ _id: req.params.id });
+  var index = user.friends.indexOf(req.params.id);
+  user.friends.splice(index, 1);
+  var index2 = friend.friends.indexOf(req.user._id);
+  friend.friends.splice(index2, 1);
+  await user.save();
+  await friend.save();
+  res.redirect(req.header("referer"));
+});
+
+// search user
+router.get("/username/:first_name", isLoggedIn, async (req, res) => {
+  const founduser = await User.find({
+    first_name: { $regex: req.params.first_name, $options: "i" },
+  });
+  res.json({ founduser: founduser });
+});
+// single post
+router.get("/post/:id", isLoggedIn, async (req, res) => {
+  const post = await postModel
+    .findById(req.params.id)
+    // .populate("author comments.author");
+    .populate({
+      path: "comments",
+      populate: {
+        path: "author",
+      },
+    });
+
+  res.json({ post: post, user: req.user });
+});
+// comment
+router.post("/comment/:id", isLoggedIn, async (req, res) => {
+  const post = await postModel.findById(req.params.id);
+  const { comment } = req.body;
+  const cmt = await commentModel.create({
+    author: req.user._id,
+    comment: comment,
+    post: req.params.id,
+  });
+  post.comments.push(cmt._id);
+  await post.save();
+  res.redirect(req.header("referer"));
+});
+// deletecomment
+router.get("/deletecomment/:postid/:cmtid", isLoggedIn, async (req, res) => {
+  const post = await postModel.findById(req.params.postid);
+  var index = post.comments.indexOf(req.params.cmtid);
+  post.comments.splice(index, 1);
+  await post.save();
+  await commentModel.findByIdAndDelete(req.params.cmtid);
+  res.redirect(req.header("referer"));
+});
+// show image route
+router.get("/image/:filename", (req, res) => {
+  gfs.files.findOne({ filename: req.params.filename }, (err, file) => {
+    // Check if file
+    if (!file || file.length === 0) {
+      return res.status(404).json({
+        err: "No file exists",
+      });
+    }
+    // Check if image
+    if (file.contentType === "image/jpeg" || file.contentType === "image/png") {
+      // Read output to browser
+      const readstream = gfs.createReadStream(file.filename);
+      readstream.pipe(res);
+    } else {
+      res.status(404).json({
+        err: "Not an image",
+      });
+    }
+  });
+});
+// show video route
+router.get("/video/:filename", (req, res) => {
+  gfs.files.findOne({ filename: req.params.filename }, (err, file) => {
+    // Check if file
+    if (!file || file.length === 0) {
+      return res.status(404).json({
+        err: "No file exists",
+      });
+    }
+    // Check if video
+    if (file.contentType === "video/mp4") {
+      // Read output to browser
+      const readstream = gfs.createReadStream(file.filename);
+      readstream.pipe(res);
+    } else {
+      res.status(404).json({
+        err: "Not a video",
+      });
+    }
+  });
+});
+// delete image
+router.get("/deleteimage/:id", (req, res) => {
+  gfs.remove({ _id: req.params.id, root: "File" }, (err, gridStore) => {
+    if (err) {
+      return res.status(404).json({ err: err });
+    }
+    res.redirect("/");
+  });
+});
+// upload profile
+router.post(
+  "/uploadprofile",
+  uploadIMG.single("profile_image"),
+  isLoggedIn,
+  async (req, res, next) => {
+    if (req.file.mimetype.split("/")[0] !== "image") {
+      return res.json({ message: "file type not supported" });
+    }
+    const user = await User.findOne({ _id: req.user._id });
+    gfs.remove(
+      { filename: user.profile_picture.split("/")[2], root: "File" },
+      (err, gridStore) => {
+        if (err) {
+          return res.status(404).json({ err: err });
+        }
+      }
+    );
+    user.profile_picture = `/image/${req.file.filename}`;
+    await user.save();
+
+    res.json({ message: "success upload profile" });
+  }
+);
+// upload cover
+router.post(
+  "/uploadcover",
+  uploadIMG.single("cover_image"),
+  isLoggedIn,
+  async (req, res, next) => {
+    const user = await User.findOne({ _id: req.user._id });
+    if (req.file.mimetype.split("/")[0] !== "image") {
+      return res.json({ message: "file type not supported" });
+    }
+    gfs.remove(
+      { filename: user.cover_photo.split("/")[2], root: "File" },
+      (err, gridStore) => {
+        if (err) {
+          return res.status(404).json({ err: err });
+        }
+      }
+    );
+    user.cover_photo = `/image/${req.file.filename}`;
+    await user.save();
+    res.json({ message: "success upload cover" });
+  }
+);
+// group
+router.post(
+  "/group",
+  uploadIMG.single("group"),
+  isLoggedIn,
+  async (req, res, next) => {
+    const group = new Group({
+      creator_id: req.user._id,
+      name: req.body.name,
+      image: `/image/${req?.file?.filename}`,
+      limit: req.body.limit,
+    });
+    await group.save();
+    const groups = await Group.find({ creator_id: req.user._id });
+
+    res.render("group", {
+      message: req.body.name + "Group Created Successfully",
+      groups: groups,
+    });
+  }
+);
+
+router.get("/message", isLoggedIn, async function (req, res, next) {
+  var users = await User.find({ _id: { $ne: req.user._id } });
+  res.render("message", { user: req.user, users: users });
+});
+// upload post
+router.post(
+  "/uploadpost",
+  uploadVID.single("file"),
+  isLoggedIn,
+  async (req, res, next) => {
+    try {
+      console.log("file type : ", req.file);
+      const post = await postModel.create({
+        author: req.user._id,
+        title: req.body.title,
+        file: `/${req?.file?.mimetype.split("/")[0]}/${req?.file?.filename}`,
+        filetype: req?.file?.mimetype.split("/")[0].trim(),
+      });
+      const user = await User.findById(req.user._id);
+      user.posts.push(post._id);
+      await user.save();
+      res.redirect("/home");
+    } catch (err) {
+      res.send(new Error(err));
+    }
+  }
+);
 router.get("/logout", function (req, res, next) {
   req.logout(function (err) {
     if (err) {
@@ -132,292 +696,147 @@ router.get("/logout", function (req, res, next) {
     res.redirect("/");
   });
 });
-/*authentication code  */
-
-const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
-
-router.get("/profile/:username", isLoggedIn, async (req, res, next) => {
-  const founduser = await userModel
-    .findOne({
-      username: req.params.username,
-    })
-    .populate("posts");
-  const user = await userModel
-    .findOne({
-      username: req.session.passport.user,
-    })
-    .populate("posts");
-  res.render("profile", { user, posts: founduser.posts, founduser });
-});
-
-router.get("/post/:postname", (req, res, next) => {
-  gfsbucket.openDownloadStreamByName(req.params.postname).pipe(res);
-});
-
-router.post(
-  "/postcreator",
-  isLoggedIn,
-  upload.single("file"),
-  async (req, res, next) => {
-    const user = await userModel.findOne({
-      username: req.session.passport.user,
-    });
-
-    const randomname = crypto.randomBytes(20).toString("hex");
-    const postData = id3.read(req.file.buffer);
-
-    await Readable.from(req.file.buffer).pipe(
-      gfsbucket.openUploadStream(randomname + "post")
-    );
-
-    await Readable.from(req.file.buffer).pipe(
-      gfsbucketvideo.openUploadStream(randomname + "video")
-    );
-
-
-    const post = await postModel.create({
-      post: randomname + "post",
-      filetype: req.file.mimetype,
-      user: req.user._id,
-      caption: req.body.caption,
-
-    });
-
-
-    user.posts.push(post._id);
-    await user.save();
-    setTimeout(() => {
-      res.redirect("/feed");
-    }, 500);
-  }
-);
-
-// story----
-router.post('/story', isLoggedIn,
-  upload.single("story"),
-  async (req, res, next) => {
-    const user = await userModel.findOne({
-      username: req.session.passport.user,
-    });
-
-    const randomname = crypto.randomBytes(20).toString("hex");
-    const postData = id3.read(req.file.buffer);
-    if (req.file.mimetype.split("/")[0] == "image") {
-      await Readable.from(req.file.buffer).pipe(
-        gfsbucket.openUploadStream(randomname + "story")
-      );
-    } else {
-      await Readable.from(req.file.buffer).pipe(
-        gfsbucketvideo.openUploadStream(randomname + "video")
-      );
+router.post("/save-edit", isLoggedIn, async function (req, res, next) {
+  await User.findByIdAndUpdate(
+    { _id: req.user._id },
+    {
+      went_to: req.body.went_to,
+      degree: req.body.degree,
+      field_of_study: req.body.field_of_study,
+      lives_in: req.body.lives_in,
+      from: req.body.from,
+      website: req.body.website,
+      birthdate: req.body.birthdate,
+      gender: req.body.gender,
     }
+  );
+  const user = await User.findById(req.user._id);
+  console.log(user);
+  res.send({ message: "success", user: user });
+});
 
-    const story = await storyModel.create({
-      file: randomname + "story",
-      author: user._id,
-    });
-    user.story.push(story._id);
-    await user.save();
-    setTimeout(() => {
-      res.redirect("/feed");
-    }, 500);
-  }
-)
-// Single Story
-// commment
-router.get("/story/:id", isLoggedIn, async (req, res, next) => {
-  const user = await userModel.findOne({
-    username: req.session.passport.user,
+router.post("/save-chat", async function (req, res, next) {
+  var chat = new Chat({
+    sender_id: req.body.sender_id,
+    receiver_id: req.body.receiver_id,
+    message: req.body.message,
   });
-  const story = await storyModel
-    .findOne({
-      _id: req.params.id,
-    })
-  res.render("story", { user, story });
+  var newChat = await chat.save();
+  res.status(200).send({ success: true, msg: "Chat Inserted", data: newChat });
 });
-
-// dp change code
-router.post(
-  "/changedp",
-  isLoggedIn,
-  upload1.single("profile-photo"),
-  (req, res, next) => {
-    userModel
-      .findOne({
-        username: req.session.passport.user,
-      })
-      .then((founduser) => {
-        if (founduser.dp !== "def.png") {
-          fs.unlinkSync(`./public/images/uploads/${founduser.dp}`);
-        }
-        founduser.dp = req.file.filename;
-        founduser.save();
-      })
-      .then(() => {
-        res.redirect(`/profile/${req.session.passport.user}`);
-      });
-  }
-);
-// likes
-router.get("/like/:id", isLoggedIn, async (req, res) => {
-  const post = await postModel.findOne({ _id: req.params.id });
-  if (post.likes.indexOf(req.user._id) === -1) {
-    post.likes.push(req.user._id);
-  } else {
-    var index = post.likes.indexOf(req.user._id);
-    post.likes.splice(index, 1);
-  }
-  await post.save();
-  res.redirect(req.header("referer"));
-});
-// commment
-router.get("/comment/:id", isLoggedIn, (req, res, next) => {
-  userModel
-    .findOne({
-      username: req.session.passport.user,
-    })
-    .then((founduser) => {
-      postModel
-        .findOne({
-          _id: req.params.id,
-        })
-        .populate([
-          {
-            path: "user",
-            model: "user",
-          },
-          {
-            path: "comments",
-            model: "comment",
-            populate: {
-              path: "user",
-              model: "user",
-            },
-          },
-        ])
-        .then((userpost) => {
-          res.render("comment", { founduser, userpost });
-        });
-    });
-});
-// follow user
-router.get("/follow/:id", isLoggedIn, async (req, res, next) => {
-  const user = await userModel.findOne({ username: req.session.passport.user });
-  const founduser = await userModel.findOne({
-    _id: req.params.id,
+router.post("/update", isLoggedIn, async function (req, res, next) {
+  var User = await User.findById({ _id: req.user._id });
+  await User.findByIdAndUpdate(
+    { _id: req.user._id },
+    {
+      first_name: req.body.first_name,
+      last_name: req.body.last_name,
+      phone: req.body.phone,
+    }
+  );
+  User.changePassword(req.body.oldpassword, req.body.newpassword, function () {
+    res.redirect("home");
   });
-
-  if (founduser.followers.indexOf(user._id) === -1) {
-    founduser.followers.push(user._id);
-    user.following.push(founduser._id);
-  } else {
-    var index = founduser.followers.indexOf(user._id);
-    founduser.followers.splice(index, 1);
-    index = user.following.indexOf(founduser._id);
-    user.following.splice(index, 1);
-  }
-  await founduser.save();
-  await user.save();
-  res.redirect(req.header("referer"));
 });
-
-// commmment
-router.post("/comment/:id", (req, res, next) => {
-  userModel
-    .findOne({
-      username: req.session.passport.user,
-    })
-    .then((user) => {
-      postModel
-        .findOne({
-          _id: req.params.id,
-        })
-        .then((foundpost) => {
-          commentModel
-            .create({
-              comment: req.body.comment,
-              user: user._id,
-            })
-            .then((cmntcreated) => {
-              foundpost.comments.push(cmntcreated._id);
-              foundpost.save().then(() => {
-                res.redirect(`/comment/${req.params.id}`);
-              });
-            });
-        });
-    });
-});
-
-router.get("/cmtLike/:cmtId/:userId", async (req, res, next) => {
-  var user = await userModel.findOne({
-    _id: req.params.userId,
-  });
-  commentModel
-    .findOne({
-      _id: req.params.cmtId,
-    })
-    .then((foundcmnt) => {
-      if (foundcmnt.likes.includes(user._id)) {
-        var index = foundcmnt.likes.indexOf(user._id);
-        foundcmnt.likes.splice(index, 1);
-      } else {
-        foundcmnt.likes.push(user);
-      }
-      foundcmnt.save().then(() => {
-        res.redirect("back");
-      });
-    });
-});
-
-// ---------------explore-----
-
-router.get("/explore", isLoggedIn, async (req, res, next) => {
-  const user = await usermodel.findOne({
-    username: req.session.passport.user,
-  });
-  const post = await postModel.find().populate("user");
-  res.render("explore", { user, post });
-});
-
 router.get("/feeds/:page/:qantity", isLoggedIn, async (req, res, next) => {
   const page = req.params.page;
   const qantity = req.params.qantity;
-
-  var user = await usermodel.findById(req.user._id)
-  const foundposts = await postModel.find().populate("user");
-  var posts = [];
-  foundposts.forEach(post => {
-    if (user.following.indexOf(post.user._id) !== -1 || user._id.toString() == post.user._id.toString()) {
-      posts.push(post);
-    }
-  });
+  const posts = await postModel.find().populate("author");
   posts.sort(function (a, b) {
-    return new Date(b.time) - new Date(a.time);
+    return new Date(b.date) - new Date(a.date);
   });
   const skip = page * qantity;
   posts.splice(0, skip);
   posts.splice(qantity, posts.length);
+
+  var user = await User.findById(req.user._id);
   res.json({ posts: posts, user: user });
 });
-// ------------saved------------
-router.get("/saved/:username", isLoggedIn, async (req, res, next) => {
-  const founduser = await userModel
-    .findOne({
-      username: req.params.username,
-    })
-    .populate("posts");
-  const user = await userModel
-    .findOne({
-      username: req.session.passport.user,
-    })
-    .populate("bookmarks");
+// get story
+router.get("/story", isLoggedIn, async (req, res, next) => {
+  const user = await User.findById(req.user._id).populate([
+    {
+      path: "friends",
+      populate: {
+        path: "stories",
+      },
+    },
+    {
+      path: "stories",
+    },
+  ]);
+  res.json({ friends: user.friends, user: user });
+});
+// post story
+router.post(
+  "/uploadstory",
+  isLoggedIn,
+  uploadIMG.single("file"),
+  async (req, res) => {
+    if (!req.file) return res.status(400).json({ err: "file not found" });
+    const user = await User.findById(req.user._id);
+    const story = new storyModel({
+      author: req.user._id,
+      file: `/${req?.file?.mimetype.split("/")[0]}/${req?.file?.filename}`,
+      filetype: req?.file?.mimetype.split("/")[0].trim(),
+    });
+    user.stories.push(story._id);
+    await user.save();
+    await story.save();
+    res.redirect("/home");
+  }
+);
+// get single story
+router.get("/story/:id", isLoggedIn, async (req, res, next) => {
+  const user = await User.findById(req.params.id).populate({
+    path: "stories",
+    populate: {
+      path: "views",
+    },
+  });
+  res.json({ user: user });
+});
+// delete single story
+router.get("/deletestory/:id", isLoggedIn, async (req, res, next) => {
+  const user = await User.findById(req.user._id);
+  await storyModel.findByIdAndDelete(req.params.id);
+  user.stories.pull(req.params.id);
+  await user.save();
+  res.redirect("/home");
+});
+// story Views
+router.get("/storyviews/:id", isLoggedIn, async (req, res, next) => {
+  const story = await storyModel.findById(req.params.id);
+  if (story.views.includes(req.user._id)) return res.json({ story: story });
+  if (story.author.toString() !== req.user._id.toString()) {
+    story.views.push(req.user._id);
+    await story.save();
+  }
+  res.json({ story: story });
+});
 
-  res.render("saved", { user, posts: user.bookmarks, founduser });
-})
-// messages----------
-router.get('/message', isLoggedIn, async (req, res, next) => {
-  const user = await userModel.findOne({ username: req.session.passport.user })
-  res.render('message', { user })
-})
+function isLoggedIn(req, res, next) {
+  if (req.isAuthenticated()) {
+    if (req.user.reports.length > 2) {
+      req.logout(function (err) {
+        if (err) {
+          return next(err);
+        }
+        res.send({ message: "your account has been reported" });
+      });
+    } else {
+      return next();
+    }
+  } else {
+    res.redirect("/");
+  }
+}
+function checkLoggedIn(req, res, next) {
+  if (req.isAuthenticated()) {
+    res.redirect("/home");
+  } else {
+    return next();
+  }
+}
+
 module.exports = router;
